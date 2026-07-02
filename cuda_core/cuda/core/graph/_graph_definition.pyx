@@ -159,6 +159,7 @@ cdef class GraphDefinition:
         dst: int,
         value,
         size_t width,
+        *,
         size_t height=1,
         size_t pitch=0
     ) -> MemsetNode:
