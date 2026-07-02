@@ -230,6 +230,12 @@ jobs:
             echo "test_pathfinder=${test_pathfinder}"
           } >> "$GITHUB_OUTPUT"
 
+  # Compares the public API of cuda_core (as defined by `__all__` in its
+  # modules/subpackages) against the PR's base branch and the latest
+  # cuda-core release tag, using griffe (see .github/actions/griffe-api-check).
+  # Findings fail this job (shows red in the UI), but it never blocks merging
+  # the PR: it's intentionally excluded from `checks:`'s `needs`, so it isn't
+  # part of the required aggregator status.
   api-check-core:
     name: API check (cuda_core)
     if: >-
@@ -262,11 +268,10 @@ jobs:
           merge-base: ${{ needs.detect-changes.outputs.pr_merge_base }}
           tag-pattern: "cuda-core-v*"
 
-      - name: Surface findings without failing the PR
+      - name: Fail this job if API changes were found
         if: ${{ steps.griffe.outputs.has-findings == 'true' }}
-        continue-on-error: true
         run: |
-          echo "::warning::cuda_core API check found differences; see the job summary for details."
+          echo "::error::cuda_core API check found differences; see the job summary for details."
           exit 1
 
   # NOTE: Build jobs are intentionally split by platform rather than using a single

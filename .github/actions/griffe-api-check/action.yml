@@ -7,9 +7,9 @@ name: griffe API check
 description: >-
   Check a package's public API (as defined by `__all__`) for changes using
   griffe, comparing the current code against both the PR's merge-base and the
-  package's latest matching release tag. Informational only: it never fails
-  the calling step directly, but reports findings via `has-findings` and a
-  job summary.
+  package's latest matching release tag. This action itself always succeeds;
+  it reports findings via the `has-findings` output and a job summary so the
+  caller can decide whether/how to fail its own job.
 
 inputs:
   package-name:
@@ -51,12 +51,15 @@ runs:
         PACKAGE_DIR: ${{ inputs.package-dir }}
         MERGE_BASE: ${{ inputs.merge-base }}
       run: |
+        # griffe writes its `::warning::`/`::error::` annotations to stderr,
+        # so stdout and stderr must both be captured for the summary file
+        # below to contain anything.
         uvx griffe check "$PACKAGE_NAME" \
           --search "$PACKAGE_DIR" \
           --find-stubs-packages \
           --against "$MERGE_BASE" \
           --format github \
-          | tee griffe-vs-base.txt
+          2>&1 | tee griffe-vs-base.txt
 
     - name: Find latest release tag
       id: latest-tag
@@ -79,12 +82,14 @@ runs:
         PACKAGE_DIR: ${{ inputs.package-dir }}
         LATEST_TAG: ${{ steps.latest-tag.outputs.tag }}
       run: |
+        # See the comment in the "Check API vs. PR base branch" step: griffe's
+        # annotations go to stderr, so redirect it into the captured stream.
         uvx griffe check "$PACKAGE_NAME" \
           --search "$PACKAGE_DIR" \
           --find-stubs-packages \
           --against "$LATEST_TAG" \
           --format github \
-          | tee griffe-vs-tag.txt
+          2>&1 | tee griffe-vs-tag.txt
 
     - name: Summarize results
       id: summarize
