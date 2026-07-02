@@ -1,0 +1,131 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: griffe API check
+
+description: >-
+  Check a package's public API (as defined by `__all__`) for changes using
+  griffe, comparing the current code against both the PR's merge-base and the
+  package's latest matching release tag. Informational only: it never fails
+  the calling step directly, but reports findings via `has-findings` and a
+  job summary.
+
+inputs:
+  package-name:
+    description: "Importable package name to check, e.g. cuda.core"
+    required: true
+  package-dir:
+    description: "Directory to search for the package sources, e.g. cuda_core"
+    required: true
+  merge-base:
+    description: >-
+      Git ref/sha to compare the current code against, typically the PR's
+      merge-base with its target branch.
+    required: true
+  tag-pattern:
+    description: >-
+      Glob pattern (as passed to `git describe --match`) matching the
+      package's release tags, e.g. cuda-core-v*
+    required: true
+
+outputs:
+  has-findings:
+    description: "true if griffe reported API differences in either comparison"
+    value: ${{ steps.summarize.outputs.has-findings }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+      with:
+        enable-cache: false
+
+    - name: Check API vs. PR base branch
+      id: vs-base
+      shell: bash --noprofile --norc -euo pipefail {0}
+      continue-on-error: true
+      env:
+        PACKAGE_NAME: ${{ inputs.package-name }}
+        PACKAGE_DIR: ${{ inputs.package-dir }}
+        MERGE_BASE: ${{ inputs.merge-base }}
+      run: |
+        uvx griffe check "$PACKAGE_NAME" \
+          --search "$PACKAGE_DIR" \
+          --find-stubs-packages \
+          --against "$MERGE_BASE" \
+          --format github \
+          | tee griffe-vs-base.txt
+
+    - name: Find latest release tag
+      id: latest-tag
+      shell: bash --noprofile --norc -euo pipefail {0}
+      env:
+        TAG_PATTERN: ${{ inputs.tag-pattern }}
+      run: |
+        # No matching tag (e.g. a brand-new package) is not an error: the
+        # release-compatibility comparison is simply skipped below.
+        tag="$(git describe --tags --match "$TAG_PATTERN" --abbrev=0 2>/dev/null || true)"
+        echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+    - name: Check API vs. latest release tag
+      id: vs-tag
+      if: ${{ steps.latest-tag.outputs.tag != '' }}
+      shell: bash --noprofile --norc -euo pipefail {0}
+      continue-on-error: true
+      env:
+        PACKAGE_NAME: ${{ inputs.package-name }}
+        PACKAGE_DIR: ${{ inputs.package-dir }}
+        LATEST_TAG: ${{ steps.latest-tag.outputs.tag }}
+      run: |
+        uvx griffe check "$PACKAGE_NAME" \
+          --search "$PACKAGE_DIR" \
+          --find-stubs-packages \
+          --against "$LATEST_TAG" \
+          --format github \
+          | tee griffe-vs-tag.txt
+
+    - name: Summarize results
+      id: summarize
+      if: always()
+      shell: bash --noprofile --norc -euo pipefail {0}
+      env:
+        PACKAGE_NAME: ${{ inputs.package-name }}
+        VS_BASE_OUTCOME: ${{ steps.vs-base.outcome }}
+        VS_TAG_OUTCOME: ${{ steps.vs-tag.outcome }}
+        LATEST_TAG: ${{ steps.latest-tag.outputs.tag }}
+      run: |
+        has_findings=false
+
+        {
+          echo "### API check: \`${PACKAGE_NAME}\`"
+          echo ""
+          echo "_This check is informational; it does not block the PR. Review findings and confirm any API changes are intentional._"
+          echo ""
+
+          if [[ "$VS_BASE_OUTCOME" == "failure" ]]; then
+            has_findings=true
+            echo "#### :warning: Changes vs. PR base branch"
+            echo '```'
+            cat griffe-vs-base.txt
+            echo '```'
+          else
+            echo "#### :white_check_mark: No changes vs. PR base branch"
+          fi
+          echo ""
+
+          if [[ -z "$LATEST_TAG" ]]; then
+            echo "#### No release tag matched; skipped release-compatibility check."
+          elif [[ "$VS_TAG_OUTCOME" == "failure" ]]; then
+            has_findings=true
+            echo "#### :warning: Changes vs. latest release (\`${LATEST_TAG}\`)"
+            echo '```'
+            cat griffe-vs-tag.txt
+            echo '```'
+          else
+            echo "#### :white_check_mark: No changes vs. latest release (\`${LATEST_TAG}\`)"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        echo "has-findings=${has_findings}" >> "$GITHUB_OUTPUT"
