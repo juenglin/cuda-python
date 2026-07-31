@@ -26,9 +26,10 @@ DEFAULT_FILENAME = "cuda_core_oom_diagnostics.txt"
 VA_ALIGNMENT = 2 * 1024 * 1024
 SMALL_VA_RESERVATION = 2 * 1024 * 1024
 SMALL_POOL_MAX_SIZE = 2 * 1024 * 1024
-# Long enough for any deferred driver-side release to land. If the default pool
-# is still unavailable afterwards, the failure is not a transient shortfall.
-RECOVERY_DELAY_SECONDS = 5.0
+# Escalating retries, cumulative 5s. A single long pause only answers whether
+# the pool comes back; the steps also measure how long that takes, which is the
+# latency any retry-based fix would have to tolerate.
+RECOVERY_RETRY_DELAYS_SECONDS = (0.0, 0.1, 0.4, 1.0, 1.5, 2.0)
 
 _BANNER = "=" * 78
 
@@ -101,18 +102,49 @@ def probe_address_space(total_memory):
     return lines
 
 
-def probe_recovery_after_delay(ordinal, dev):
-    """Retry the default pool after an idle pause.
+def _default_pool_attempt(dev):
+    """Look up the default pool. Returns ``(succeeded, rendered result)``."""
+    try:
+        err, _pool = driver.cuDeviceGetDefaultMemPool(dev)
+    except Exception as exc:  # see format_probe
+        return False, f"<raised {exc!r}>"
+    return err == driver.CUresult.CUDA_SUCCESS, repr(err)
 
-    If deferred release is the cause, an idle pause is enough to recover; if
-    the pool is still unavailable, the failure is structural.
+
+def probe_recovery(ordinal, dev):
+    """Establish whether the default pool comes back, and what waiting costs.
+
+    Synchronizing first separates a release gated on outstanding work, which a
+    synchronous fix could handle without sleeping, from one owned by a driver
+    background thread, where only elapsed time helps. The escalating retries
+    then turn "it recovers eventually" into a latency.
+
+    The probes above this one reserve and release address space themselves, so
+    a latency measured here is an upper bound on what an otherwise idle process
+    would see.
     """
-    time.sleep(RECOVERY_DELAY_SECONDS)
-    return format_probe(
-        f"cuDeviceGetDefaultMemPool(dev {ordinal}) after {RECOVERY_DELAY_SECONDS:g}s idle",
-        driver.cuDeviceGetDefaultMemPool,
-        dev,
-    )
+    lines = ["--- default pool recovery ---"]
+    label = f"cuDeviceGetDefaultMemPool(dev {ordinal})"
+
+    lines.append(format_probe("cuCtxSynchronize()", driver.cuCtxSynchronize))
+    recovered, rendered = _default_pool_attempt(dev)
+    lines.append(f"{label} after cuCtxSynchronize -> {rendered}")
+    if recovered:
+        lines.append("=> recovered on synchronize: release is gated on outstanding work")
+        return lines
+
+    waited = 0.0
+    for delay in RECOVERY_RETRY_DELAYS_SECONDS:
+        time.sleep(delay)
+        waited += delay
+        recovered, rendered = _default_pool_attempt(dev)
+        lines.append(f"{label} after {waited:.1f}s idle -> {rendered}")
+        if recovered:
+            lines.append(f"=> recovered after {waited:.1f}s idle: release is deferred, not gated on work")
+            return lines
+
+    lines.append(f"=> still unavailable after {waited:.1f}s idle: not a transient shortfall")
+    return lines
 
 
 def probe_driver_state():
@@ -147,6 +179,7 @@ def probe_driver_state():
         return "\n".join(lines)
 
     first_device = None
+    first_pool_available = False
     for ordinal in range(count):
         try:
             err, dev = driver.cuDeviceGet(ordinal)
@@ -156,17 +189,26 @@ def probe_driver_state():
         if err != driver.CUresult.CUDA_SUCCESS:
             lines.append(f"cuDeviceGet({ordinal}) -> {err!r}")
             continue
+        lines.append(format_probe(f"cuDeviceGetMemPool(dev {ordinal})", driver.cuDeviceGetMemPool, dev))
+        available, rendered = _default_pool_attempt(dev)
+        lines.append(f"cuDeviceGetDefaultMemPool(dev {ordinal}) -> {rendered}")
         if first_device is None:
             first_device = (ordinal, dev)
-        lines.append(format_probe(f"cuDeviceGetMemPool(dev {ordinal})", driver.cuDeviceGetMemPool, dev))
-        lines.append(format_probe(f"cuDeviceGetDefaultMemPool(dev {ordinal})", driver.cuDeviceGetDefaultMemPool, dev))
+            first_pool_available = available
         lines.append(probe_small_pool_create(ordinal))
 
     lines.extend(probe_address_space(total_memory))
 
     # Last, so the probes above report state as it was at the moment of failure.
     if first_device is not None:
-        lines.append(probe_recovery_after_delay(*first_device))
+        if first_pool_available:
+            # Recovery only means something if the pool was actually lost;
+            # otherwise "recovered" would be read as a diagnosis of a failure
+            # that happened somewhere else entirely.
+            lines.append("--- default pool recovery ---")
+            lines.append(f"not applicable: dev {first_device[0]} default pool was already available")
+        else:
+            lines.extend(probe_recovery(*first_device))
 
     return "\n".join(lines)
 
