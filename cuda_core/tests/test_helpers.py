@@ -13,10 +13,10 @@ from helpers.oom_diagnostics import (
     DEFAULT_FILENAME,
     OOM_MARKER,
     OomDiagnosticsRecorder,
+    format_probe,
     probe_driver_state,
     record_if_oom,
     report_terminal_summary,
-    run_nvidia_smi,
 )
 
 from cuda.core import Device
@@ -114,6 +114,12 @@ def _fake_item(rootpath, nodeid="tests/test_x.py::test_a"):
     return types.SimpleNamespace(nodeid=nodeid, config=config)
 
 
+@pytest.fixture
+def fast_oom_probes(monkeypatch):
+    """Drop the recovery pause, which only earns its cost on a real failure."""
+    monkeypatch.setattr("helpers.oom_diagnostics.RECOVERY_DELAY_SECONDS", 0.0)
+
+
 @pytest.mark.agent_authored(model="claude-opus-5")
 @pytest.mark.parametrize(
     ("failed", "exc_text", "should_capture"),
@@ -124,7 +130,7 @@ def _fake_item(rootpath, nodeid="tests/test_x.py::test_a"):
         (True, None, False),
     ],
 )
-def test_oom_diagnostics_fire_only_on_a_failing_oom(tmp_path, failed, exc_text, should_capture):
+def test_oom_diagnostics_fire_only_on_a_failing_oom(tmp_path, fast_oom_probes, failed, exc_text, should_capture):
     recorder = OomDiagnosticsRecorder()
     result = record_if_oom(_fake_item(tmp_path), _fake_call(exc_text), _fake_report(failed), recorder=recorder)
 
@@ -133,7 +139,7 @@ def test_oom_diagnostics_fire_only_on_a_failing_oom(tmp_path, failed, exc_text, 
 
 
 @pytest.mark.agent_authored(model="claude-opus-5")
-def test_oom_diagnostics_write_an_artifact_naming_the_failing_test(tmp_path, monkeypatch):
+def test_oom_diagnostics_write_an_artifact_naming_the_failing_test(tmp_path, monkeypatch, fast_oom_probes):
     # Omitting `recorder` also pins the call signature conftest.py relies on.
     # Patching the singleton keeps this from latching diagnostics for the run.
     recorder = OomDiagnosticsRecorder()
@@ -152,7 +158,7 @@ def test_oom_diagnostics_write_an_artifact_naming_the_failing_test(tmp_path, mon
 
 
 @pytest.mark.agent_authored(model="claude-opus-5")
-def test_oom_diagnostics_summary_points_at_the_artifact(tmp_path):
+def test_oom_diagnostics_summary_points_at_the_artifact(tmp_path, fast_oom_probes):
     # The report is emitted beside the failing test, thousands of lines above
     # the summary; without this line the artifact is effectively invisible.
     recorder = OomDiagnosticsRecorder()
@@ -171,7 +177,7 @@ def test_oom_diagnostics_summary_points_at_the_artifact(tmp_path):
 
 
 @pytest.mark.agent_authored(model="claude-opus-5")
-def test_oom_diagnostics_latch_to_the_first_oom(tmp_path):
+def test_oom_diagnostics_latch_to_the_first_oom(tmp_path, fast_oom_probes):
     # A failing run produces ~190 OOMs; capturing each would bury the log.
     recorder = OomDiagnosticsRecorder()
     assert recorder.capture("first", "call", OOM_MARKER, tmp_path) is not None
@@ -182,19 +188,40 @@ def test_oom_diagnostics_latch_to_the_first_oom(tmp_path):
 
 
 @pytest.mark.agent_authored(model="claude-opus-5")
-def test_oom_diagnostics_survive_a_missing_nvidia_smi(monkeypatch):
+def test_oom_diagnostics_record_probe_failures_instead_of_raising():
     # Raising inside the pytest hook would mask the failure being diagnosed.
-    def _explode(*args, **kwargs):
-        raise FileNotFoundError("nvidia-smi")
+    def _explode():
+        raise RuntimeError("driver is wedged")
 
-    monkeypatch.setattr("helpers.oom_diagnostics.subprocess.run", _explode)
-    assert "could not run" in run_nvidia_smi("-q")
+    assert "driver is wedged" in format_probe("cuSomething()", _explode)
 
 
 @pytest.mark.agent_authored(model="claude-opus-5")
-def test_oom_diagnostics_probe_reports_live_driver_state(init_cuda):
+def test_oom_diagnostics_probe_reports_live_driver_state(init_cuda, fast_oom_probes):
     text = probe_driver_state()
     assert "cuMemGetInfo()" in text
     assert "cuDeviceGetMemPool" in text
     # A healthy device must report a usable default mempool.
     assert "CUDA_SUCCESS" in text
+
+
+@pytest.mark.agent_authored(model="claude-opus-5")
+def test_oom_diagnostics_probe_exercises_pools_and_address_space(init_cuda, fast_oom_probes):
+    # These probes are what separate an exhausted address space from a merely
+    # fragmented one, so losing them would leave issue #2381 undiagnosable.
+    text = probe_driver_state()
+    assert "cuMemPoolCreate(dev 0" in text
+    assert "small reservation" in text
+    assert "pool-sized reservation" in text
+    assert "after 0s idle" in text
+
+
+@pytest.mark.agent_authored(model="claude-opus-5")
+def test_oom_diagnostics_probes_release_what_they_reserve(init_cuda, fast_oom_probes):
+    # A probe that leaked its reservation would corrupt the state it reports on.
+    text = probe_driver_state()
+    for line in text.splitlines():
+        if "reservation" in line and "CUDA_SUCCESS" in line:
+            assert "release" in line
+        if line.startswith("cuMemPoolCreate(dev ") and "CUDA_SUCCESS" in line:
+            assert "destroy" in line

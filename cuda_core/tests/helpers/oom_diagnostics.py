@@ -5,20 +5,30 @@
 
 A failing ``cuda_core`` run reports ~190 ``CUDA_ERROR_OUT_OF_MEMORY`` failures
 that all descend from a single earlier event, so only the first is worth
-capturing; running ``nvidia-smi`` on every one would add minutes and bury the
-log. Hence the latch in :class:`OomDiagnosticsRecorder`.
+capturing; the probes below deliberately sleep and reserve address space, which
+would add minutes and bury the log if repeated. Hence the latch in
+:class:`OomDiagnosticsRecorder`.
 """
 
 import os
 import pathlib
-import subprocess
 import sys
 import threading
+import time
 
 from cuda.bindings import driver
 
 OOM_MARKER = "CUDA_ERROR_OUT_OF_MEMORY"
 DEFAULT_FILENAME = "cuda_core_oom_diagnostics.txt"
+
+# cuMemAddressReserve wants a power-of-two alignment; the driver log in nvbug
+# 5815123 shows the failing pool reservation using 2 MiB.
+VA_ALIGNMENT = 2 * 1024 * 1024
+SMALL_VA_RESERVATION = 2 * 1024 * 1024
+SMALL_POOL_MAX_SIZE = 2 * 1024 * 1024
+# Long enough for any deferred driver-side release to land. If the default pool
+# is still unavailable afterwards, the failure is not a transient shortfall.
+RECOVERY_DELAY_SECONDS = 5.0
 
 _BANNER = "=" * 78
 
@@ -29,6 +39,80 @@ def format_probe(label, fn, *args):
         return f"{label} -> {fn(*args)!r}"
     except Exception as exc:  # diagnostics must never mask the original test failure
         return f"{label} -> <raised {exc!r}>"
+
+
+def probe_va_reservation(label, size):
+    """Reserve a virtual address range and release it again.
+
+    Reserving costs address space but no memory, so this is a direct read of
+    what the address space can still satisfy.
+    """
+    # Device memory sizes are not generally a multiple of the alignment, and
+    # cuMemAddressReserve rejects sizes that are not with CUDA_ERROR_INVALID_VALUE.
+    size = ((size + VA_ALIGNMENT - 1) // VA_ALIGNMENT) * VA_ALIGNMENT
+    try:
+        err, ptr = driver.cuMemAddressReserve(size, VA_ALIGNMENT, 0, 0)
+    except Exception as exc:  # see format_probe
+        return f"{label} ({size:#x}) -> <raised {exc!r}>"
+    if err != driver.CUresult.CUDA_SUCCESS:
+        return f"{label} ({size:#x}) -> {err!r}"
+    released = format_probe("release", driver.cuMemAddressFree, ptr, size)
+    return f"{label} ({size:#x}) -> {err!r}; {released}"
+
+
+def probe_small_pool_create(ordinal):
+    """Create and destroy a pool with an explicit small ``maxSize``.
+
+    An explicit ``maxSize`` caps the pool's VA reservation, so this succeeding
+    while the default pool fails means the address space is fragmented rather
+    than exhausted.
+    """
+    label = f"cuMemPoolCreate(dev {ordinal}, maxSize={SMALL_POOL_MAX_SIZE:#x})"
+    try:
+        properties = driver.CUmemPoolProps()
+        properties.allocType = driver.CUmemAllocationType.CU_MEM_ALLOCATION_TYPE_PINNED
+        properties.handleTypes = driver.CUmemAllocationHandleType.CU_MEM_HANDLE_TYPE_NONE
+        properties.location.type = driver.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE
+        properties.location.id = ordinal
+        properties.maxSize = SMALL_POOL_MAX_SIZE
+        err, pool = driver.cuMemPoolCreate(properties)
+    except Exception as exc:  # see format_probe
+        return f"{label} -> <raised {exc!r}>"
+    if err != driver.CUresult.CUDA_SUCCESS:
+        return f"{label} -> {err!r}"
+    destroyed = format_probe("destroy", driver.cuMemPoolDestroy, pool)
+    return f"{label} -> {err!r}; {destroyed}"
+
+
+def probe_address_space(total_memory):
+    """Separate an exhausted address space from a merely fragmented one.
+
+    Each pool reserves roughly 2x device memory, and Windows MCDM caps the
+    whole address space at 40 bits (1 TiB), so a couple of pools can consume it
+    (nvbug 5387350). A small reservation succeeding while a pool-sized one
+    fails points at contiguity rather than capacity.
+    """
+    lines = ["--- address space probes ---"]
+    lines.append(probe_va_reservation("small reservation", SMALL_VA_RESERVATION))
+    if total_memory is None:
+        lines.append("pool-sized reservation -> <skipped: device memory size unknown>")
+    else:
+        lines.append(probe_va_reservation("pool-sized reservation", 2 * total_memory))
+    return lines
+
+
+def probe_recovery_after_delay(ordinal, dev):
+    """Retry the default pool after an idle pause.
+
+    If deferred release is the cause, an idle pause is enough to recover; if
+    the pool is still unavailable, the failure is structural.
+    """
+    time.sleep(RECOVERY_DELAY_SECONDS)
+    return format_probe(
+        f"cuDeviceGetDefaultMemPool(dev {ordinal}) after {RECOVERY_DELAY_SECONDS:g}s idle",
+        driver.cuDeviceGetDefaultMemPool,
+        dev,
+    )
 
 
 def probe_driver_state():
@@ -42,7 +126,15 @@ def probe_driver_state():
     """
     lines = ["--- direct driver probe (bypasses cuda.core error reporting) ---"]
     lines.append(format_probe("cuCtxGetCurrent()", driver.cuCtxGetCurrent))
-    lines.append(format_probe("cuMemGetInfo()", driver.cuMemGetInfo))
+
+    total_memory = None
+    try:
+        err, free, total = driver.cuMemGetInfo()
+        lines.append(f"cuMemGetInfo() -> ({err!r}, free={free}, total={total})")
+        if err == driver.CUresult.CUDA_SUCCESS:
+            total_memory = total
+    except Exception as exc:  # see format_probe
+        lines.append(f"cuMemGetInfo() -> <raised {exc!r}>")
 
     try:
         err, count = driver.cuDeviceGetCount()
@@ -54,6 +146,7 @@ def probe_driver_state():
     if err != driver.CUresult.CUDA_SUCCESS:
         return "\n".join(lines)
 
+    first_device = None
     for ordinal in range(count):
         try:
             err, dev = driver.cuDeviceGet(ordinal)
@@ -63,21 +156,19 @@ def probe_driver_state():
         if err != driver.CUresult.CUDA_SUCCESS:
             lines.append(f"cuDeviceGet({ordinal}) -> {err!r}")
             continue
+        if first_device is None:
+            first_device = (ordinal, dev)
         lines.append(format_probe(f"cuDeviceGetMemPool(dev {ordinal})", driver.cuDeviceGetMemPool, dev))
         lines.append(format_probe(f"cuDeviceGetDefaultMemPool(dev {ordinal})", driver.cuDeviceGetDefaultMemPool, dev))
+        lines.append(probe_small_pool_create(ordinal))
+
+    lines.extend(probe_address_space(total_memory))
+
+    # Last, so the probes above report state as it was at the moment of failure.
+    if first_device is not None:
+        lines.append(probe_recovery_after_delay(*first_device))
 
     return "\n".join(lines)
-
-
-def run_nvidia_smi(*args):
-    cmd = ["nvidia-smi", *args]
-    printable = " ".join(cmd)
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)  # noqa: S603
-    except (OSError, subprocess.SubprocessError) as exc:
-        return f"$ {printable}\n<could not run: {exc!r}>"
-    output = proc.stdout.strip() or proc.stderr.strip() or "<no output>"
-    return f"$ {printable}\n(exit {proc.returncode})\n{output}"
 
 
 class OomDiagnosticsRecorder:
@@ -126,10 +217,6 @@ class OomDiagnosticsRecorder:
                 f"exception: {exc_text}",
                 "",
                 probe_driver_state(),
-                "",
-                run_nvidia_smi("-q"),
-                "",
-                run_nvidia_smi("--query-compute-apps=timestamp,pid,process_name,used_memory", "--format=csv"),
                 _BANNER,
             ]
         )
