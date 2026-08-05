@@ -19,6 +19,7 @@ from helpers.oom_diagnostics import (
     record_if_oom,
     report_terminal_summary,
 )
+from helpers.va_trace import VA_ALIGNMENT, HeadroomProbe, align_up
 
 from cuda.bindings import driver
 from cuda.core import Device
@@ -283,3 +284,73 @@ def test_oom_diagnostics_recovery_escalates_then_gives_up(init_cuda, monkeypatch
 
     assert text.count("s idle ->") == 2
     assert "not a transient shortfall" in text
+
+
+# helpers.va_trace (issue #2381). Like the diagnostics above, these only earn
+# their keep on a run that is already going wrong.
+
+GIB = 1 << 30
+
+
+def _fake_reserve(limit, log=None):
+    """Grants any reservation up to ``limit``, recording what was asked."""
+
+    def reserve(size):
+        if log is not None:
+            log.append(size)
+        return size <= limit
+
+    return reserve
+
+
+@pytest.mark.agent_authored(model="claude-opus-5")
+def test_va_probe_holds_the_ceiling_with_one_call():
+    # The steady state is what a full suite pays 4000 times over; a probe that
+    # brackets the boundary instead costs seconds per test.
+    asked = []
+    probe = HeadroomProbe(reserve=_fake_reserve(100 * GIB, asked))
+
+    assert probe.measure(48 * GIB) == 48 * GIB
+    assert probe.kind == "ceiling"
+    assert asked == [48 * GIB]
+
+
+@pytest.mark.agent_authored(model="claude-opus-5")
+def test_va_probe_searches_only_once_the_ceiling_is_refused():
+    probe = HeadroomProbe(reserve=_fake_reserve(20 * GIB), refine_steps=0)
+
+    headroom = probe.measure(48 * GIB)
+
+    assert probe.kind == "drop"
+    assert 10 * GIB <= headroom <= 20 * GIB
+    # The next sample holds the lowered watermark rather than re-paying.
+    assert probe.measure(48 * GIB) == headroom
+    assert probe.kind == "hold"
+
+
+@pytest.mark.agent_authored(model="claude-opus-5")
+def test_va_probe_retries_the_ceiling_so_recovery_is_visible():
+    # Without this the trace could only ever show the address space shrinking,
+    # which is exactly the wrong shape for measuring whether a trim helps.
+    probe = HeadroomProbe(reserve=_fake_reserve(20 * GIB), refine_steps=0, reprobe_interval=1)
+    probe.measure(48 * GIB)
+
+    probe._raw_reserve = _fake_reserve(48 * GIB)
+    probe.measure(48 * GIB)
+
+    assert probe.measure(48 * GIB) == 48 * GIB
+    assert probe.kind == "ceiling"
+
+
+@pytest.mark.agent_authored(model="claude-opus-5")
+def test_va_probe_aligns_sizes_the_driver_would_reject():
+    # Device memory is not a multiple of the 2 MiB granularity, so an unaligned
+    # ask fails with CUDA_ERROR_INVALID_VALUE at every size -- which reads as a
+    # fully exhausted address space rather than as a bug in the probe.
+    asked = []
+    probe = HeadroomProbe(reserve=_fake_reserve(100 * GIB, asked))
+    ceiling = 2 * 25650855936  # a real cuMemGetInfo total, doubled
+
+    probe.measure(align_up(ceiling))
+
+    assert asked and all(size % VA_ALIGNMENT == 0 for size in asked)

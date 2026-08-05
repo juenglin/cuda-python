@@ -31,6 +31,7 @@ pytest_plugins = ["cuda_python_test_helpers._pytest_plugin"]
 
 from cuda_python_test_helpers.marks import skipif_need_cuda_headers  # noqa: F401 (re-exported for tests)
 from cuda_python_test_helpers.mempool import xfail_if_mempool_oom
+from helpers import oom_diagnostics, va_trace
 
 import cuda.core
 from cuda.bindings import driver
@@ -53,22 +54,27 @@ def pytest_configure(config):
     if parallel_threads == "auto" or int(parallel_threads) > 1:
         config.pluginmanager.register(_CudaCoreParallelPlugin(), name="_cuda_core_parallel_plugin")
 
+    va_trace.configure(config.rootpath)
+
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(item, call):
     # Captures machine state on the first CUDA OOM of a session; see issue
     # #2381 and helpers/oom_diagnostics.py for why this is latched.
     report = yield
-    from helpers import oom_diagnostics
-
     oom_diagnostics.record_if_oom(item, call, report)
     return report
 
 
-def pytest_terminal_summary(terminalreporter):
-    from helpers import oom_diagnostics
+def pytest_runtest_setup(item):
+    # Labels the address-space sample taken during this test's teardown; the
+    # fixture that samples has no other way to name the test it followed.
+    va_trace.set_current_nodeid(item.nodeid)
 
+
+def pytest_terminal_summary(terminalreporter):
     oom_diagnostics.report_terminal_summary(terminalreporter)
+    va_trace.report_terminal_summary(terminalreporter)
 
 
 @contextmanager
@@ -98,6 +104,15 @@ def _init_cuda_context():
         # never enqueued because their owning object had not been collected yet.
         gc.collect()
         driver.cuCtxSynchronize()
+        # Graph memory nodes reserve address space that the driver keeps cached
+        # for reuse after the owning graph is gone; only a trim returns it.
+        # Off by default so a trace run first measures the accumulation, then a
+        # second run measures what trimming it away is worth (issue #2381).
+        if int(os.environ.get("CUDA_CORE_GRAPH_MEM_TRIM", 0)) != 0:
+            handle_return(driver.cuDeviceGraphMemTrim(device.device_id))
+        # After the release work above, so the sample reflects what this test
+        # actually left behind.
+        va_trace.sample(device.device_id)
         _ = _device_unset_current()
 
 
