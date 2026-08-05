@@ -15,7 +15,8 @@ as zero on both while holding a device-memory-sized reservation. The only
 direct read is to ask the driver for a reservation and see what it grants,
 which is what :class:`HeadroomProbe` does.
 
-Enabled by default on this branch; set ``CUDA_CORE_VA_TRACE=0`` to turn it off.
+Off by default, because sampling is not free: set ``CUDA_CORE_VA_TRACE=1`` to
+turn it on. Reach for it once a cheaper experiment has failed to explain a run.
 """
 
 import os
@@ -55,7 +56,7 @@ COLUMNS = (
 
 
 def trace_enabled():
-    return os.environ.get("CUDA_CORE_VA_TRACE", "1") not in ("0", "", "false", "False")
+    return os.environ.get("CUDA_CORE_VA_TRACE", "0") not in ("0", "", "false", "False")
 
 
 def refine_steps():
