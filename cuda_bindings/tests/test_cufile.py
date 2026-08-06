@@ -1844,9 +1844,8 @@ def test_get_bar_size_in_kb():
     try:
         bar_size_kb = cufile.get_bar_size_in_kb(0)
     except cufile.cuFileError as e:
-        if get_tegra_kind() != "Thor":
-            raise
-        pytest.xfail(f"TODO(#9999): Resolve Thor: cuFileError: {e!s}")
+        if e.cuda_error == cuda.CUresult.CUDA_ERROR_NOT_SUPPORTED:
+            pytest.xfail(f"System does not support BAR lookup; cuFileError: {e!s}")
 
     # Verify BAR size is a reasonable value
     assert isinstance(bar_size_kb, int), "BAR size should be an integer"
