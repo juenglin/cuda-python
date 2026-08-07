@@ -209,6 +209,12 @@ cdef extern from 'cufile.h':
         CUfileOpError err
         CUresult cu_err
 
+# Error-inspection macros from cufile.h (declared as functions so Cython
+# emits calls that the C preprocessor expands).
+cdef extern from 'cufile.h' nogil:
+    bint IS_CUDA_ERR(CUfileError_t status)
+    bint IS_CUFILE_ERR(CUfileOpError err)
+
 cdef struct cuda_bindings_cufile__anon_pod0:
     unsigned int major_version
     unsigned int minor_version

@@ -2986,9 +2986,12 @@ class cuFileError(Exception):
 @cython.profile(False)
 cdef int check_status(ReturnT status) except 1 nogil:
     if ReturnT is CUfileError_t:
-        if status.err != 0 or status.cu_err != 0:
+        if IS_CUDA_ERR(status):
             with gil:
                 raise cuFileError(status.err, status.cu_err)
+        elif IS_CUFILE_ERR(status.err):
+            with gil:
+                raise cuFileError(status.err)
     elif ReturnT is ssize_t:
         if status == -1:
             # note: this assumes cuFile already properly resets errno in each API
