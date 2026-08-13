@@ -894,6 +894,29 @@ def test_texture_object_rejects_bad_options_type(init_cuda):
         arr.close()
 
 
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_texture_object_rejects_dict_options(init_cuda):
+    arr = Device().create_opaque_array(OpaqueArrayOptions(shape=(8, 8), format=ArrayFormatType.FLOAT32, num_channels=1))
+    try:
+        res = ResourceDescriptor.from_opaque_array(arr)
+        with pytest.raises(TypeError, match="must be provided as an object of type TextureObjectOptions"):
+            Device().create_texture_object(resource=res, options={})
+    finally:
+        arr.close()
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_create_opaque_array_rejects_dict_options(init_cuda):
+    with pytest.raises(TypeError, match="must be provided as an object of type OpaqueArrayOptions"):
+        Device().create_opaque_array(options={})
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_create_mipmapped_array_rejects_dict_options(init_cuda):
+    with pytest.raises(TypeError, match="must be provided as an object of type MipmappedArrayOptions"):
+        Device().create_mipmapped_array(options={})
+
+
 def test_texture_object_rejects_bad_filter_mode(init_cuda):
     # Invalid enum values are rejected at TextureObjectOptions construction.
     with pytest.raises(ValueError, match="filter_mode must be a FilterModeType"):

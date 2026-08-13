@@ -108,10 +108,10 @@ def test_event_is_monadic(ipc_device):
     """Check that IPC-enabled events are always bound and cannot be reset."""
     device = ipc_device
     with pytest.raises(TypeError, match=r"^IPC-enabled events must be bound; use Stream.record for creation\.$"):
-        device.create_event({"ipc_enabled": True})
+        device.create_event(EventOptions(ipc_enabled=True))
 
     stream = device.create_stream()
-    e = stream.record(options={"ipc_enabled": True})
+    e = stream.record(options=EventOptions(ipc_enabled=True))
     with pytest.raises(
         TypeError,
         match=r"^IPC-enabled events should not be re-recorded, instead create a new event by supplying options\.$",
@@ -120,9 +120,7 @@ def test_event_is_monadic(ipc_device):
 
 
 @pytest.mark.flaky(reruns=2)
-@pytest.mark.parametrize(
-    "options", [{"ipc_enabled": True, "timing_enabled": True}, EventOptions(ipc_enabled=True, timing_enabled=True)]
-)
+@pytest.mark.parametrize("options", [EventOptions(ipc_enabled=True, timing_enabled=True)])
 def test_event_timing_disabled(ipc_device, options):
     """Check that IPC-enabled events cannot be created with timing enabled."""
     device = ipc_device
@@ -139,9 +137,8 @@ class TestIpcEventProperties:
 
     @pytest.mark.flaky(reruns=2)
     @pytest.mark.parametrize("blocking_sync", [True, False])
-    @pytest.mark.parametrize("use_options_cls", [True, False])
     @pytest.mark.parametrize("use_option_kw", [True, False])
-    def test_main(self, ipc_device, blocking_sync, use_options_cls, use_option_kw):
+    def test_main(self, ipc_device, blocking_sync, use_option_kw):
         device = ipc_device
         stream = device.create_stream()
 
@@ -151,11 +148,7 @@ class TestIpcEventProperties:
         process.start()
 
         # Create an event and send it.
-        options = (
-            EventOptions(ipc_enabled=True, blocking_sync=blocking_sync)
-            if use_options_cls
-            else {"ipc_enabled": True, "blocking_sync": blocking_sync}
-        )
+        options = EventOptions(ipc_enabled=True, blocking_sync=blocking_sync)
         e = stream.record(options=options) if use_option_kw else stream.record(None, options)
         q_out.put(e)
 

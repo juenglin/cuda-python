@@ -72,7 +72,7 @@ def _check_nvrtc_error(error, handle=None) -> int:
 
 def check_or_create_options(cls: type, options: object, options_description: str='', keep_none: bool=False) -> object:
     """
-    Create the specified options dataclass from a dictionary of options or None.
+    Create the specified options dataclass from None, or validate an existing instance.
     """
 
 def _parse_fill_value(value) -> tuple:

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
@@ -89,3 +89,9 @@ def test_context_dict_key(init_cuda):
 
     ctx_cache = {context: "context_data"}
     assert ctx_cache[context] == "context_data"
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_create_context_rejects_dict_options(init_cuda):
+    with pytest.raises(TypeError, match="must be provided as an object of type ContextOptions"):
+        Device().create_context(options={})

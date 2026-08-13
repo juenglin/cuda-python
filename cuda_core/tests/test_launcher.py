@@ -22,6 +22,7 @@ from cuda.core import (
     LegacyPinnedMemoryResource,
     Program,
     ProgramOptions,
+    StreamOptions,
     launch,
 )
 from cuda.core._memory._legacy import _SynchronousMemoryResource
@@ -218,7 +219,7 @@ def test_pdl_primary_secondary_overlap_same_stream():
     if dev.compute_capability < (9, 0):
         pytest.skip("Programmatic Dependent Launch requires compute capability >= 9.0")
     dev.set_current()
-    stream = dev.create_stream(options={"nonblocking": True})
+    stream = dev.create_stream(options=StreamOptions(nonblocking=True))
 
     # clock64 budgets are in GPU cycles; keep the post-trigger window long enough
     # for the secondary to boot, but short enough for a unit test.
@@ -483,7 +484,7 @@ def test_launch_scalar_argument(python_type, cpp_type, init_value):
 def test_cooperative_launch():
     dev = Device()
     dev.set_current()
-    s = dev.create_stream(options={"nonblocking": True})
+    s = dev.create_stream(options=StreamOptions(nonblocking=True))
 
     # CUDA kernel templated on type T
     code = r"""
@@ -756,3 +757,10 @@ def test_kernel_arg_python_isinstance_fallbacks():
 
     holder = ParamHolder([MyBool(1), MyFloat(1.5), MyComplex(1 + 2j)])
     assert holder.ptr != 0
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_launch_rejects_dict_config(init_cuda):
+    stream = Device().create_stream()
+    with pytest.raises(TypeError, match="must be provided as an object of type LaunchConfig"):
+        launch(stream, {}, None)

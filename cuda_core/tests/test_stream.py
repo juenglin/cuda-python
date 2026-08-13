@@ -469,3 +469,16 @@ def test_created_stream_keeps_its_own_context():
     finally:
         dev0.set_current()
         stream.close()
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_create_stream_rejects_dict_options(init_cuda):
+    with pytest.raises(TypeError, match="must be provided as an object of type StreamOptions"):
+        Device().create_stream(options={})
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_context_create_stream_rejects_dict_options(init_cuda):
+    ctx = Device().create_stream().context
+    with pytest.raises(TypeError, match="must be provided as an object of type StreamOptions"):
+        ctx.create_stream(options={})

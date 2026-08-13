@@ -364,7 +364,7 @@ def test_program_options_name_accepts_none(name):
 # This is tested against the current device's arch
 def test_program_compile_valid_target_type(init_cuda):
     code = 'extern "C" __global__ void my_kernel() {}'
-    program = Program(code, "c++", options={"name": "42"})
+    program = Program(code, "c++", options=ProgramOptions(name="42"))
 
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
@@ -376,7 +376,7 @@ def test_program_compile_valid_target_type(init_cuda):
         ptx_kernel = ptx_object_code.get_kernel("my_kernel")
         assert isinstance(ptx_kernel, Kernel)
 
-    program = Program(ptx_object_code.code.decode(), "ptx", options={"name": "24"})
+    program = Program(ptx_object_code.code.decode(), "ptx", options=ProgramOptions(name="24"))
     cubin_object_code = program.compile("cubin")
     assert isinstance(cubin_object_code, ObjectCode)
     assert cubin_object_code.name == "24"
@@ -389,6 +389,13 @@ def test_program_compile_invalid_target_type():
     program = Program(code, "c++")
     with pytest.raises(ValueError):
         program.compile("invalid_target")
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_program_rejects_dict_options():
+    code = 'extern "C" __global__ void my_kernel() {}'
+    with pytest.raises(TypeError, match="must be provided as an object of type ProgramOptions"):
+        Program(code, "c++", options={})
 
 
 def test_nvrtc_compile_invalid_code(init_cuda):

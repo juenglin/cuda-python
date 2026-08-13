@@ -679,3 +679,15 @@ class TestGreenContextKernelLaunch:
             _launch_fill_and_verify(dev, stream, fill_kernel, n=32, value=99)
         finally:
             ctx.close()
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_sm_resource_split_rejects_dict_options(sm_resource):
+    with pytest.raises(TypeError, match="must be provided as an object of type SMResourceOptions"):
+        sm_resource.split({})
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_workqueue_resource_configure_rejects_dict_options(wq_resource):
+    with pytest.raises(TypeError, match="must be provided as an object of type WorkqueueResourceOptions"):
+        wq_resource.configure({})

@@ -200,7 +200,7 @@ def handle_return(result: tuple[Any, ...], handle: object = None) -> Any:
 
 cpdef object check_or_create_options(type cls, object options, str options_description="", bint keep_none=False):
     """
-    Create the specified options dataclass from a dictionary of options or None.
+    Create the specified options dataclass from None, or validate an existing instance.
     """
     if options is None:
         if keep_none:
@@ -208,12 +208,10 @@ cpdef object check_or_create_options(type cls, object options, str options_descr
         return cls()
     elif isinstance(options, cls):
         return options
-    elif isinstance(options, dict):
-        return cls(**options)
     else:
         raise TypeError(
             f"The {options_description} must be provided as an object "
-            f"of type {cls.__name__} or as a dict with valid {options_description}. "
+            f"of type {cls.__name__}. "
             f"The provided object is '{options}'."
         )
 

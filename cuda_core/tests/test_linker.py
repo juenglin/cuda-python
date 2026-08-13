@@ -448,3 +448,12 @@ def test_as_bytes_nvjitlink_unavailable(monkeypatch):
     opts = LinkerOptions(arch="sm_80")
     with pytest.raises(RuntimeError, match="nvJitLink backend is not available"):
         opts.as_bytes("nvjitlink")
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_linker_rejects_dict_options(init_cuda):
+    from cuda.core._module import ObjectCode
+
+    obj = ObjectCode._init(b"\x7fELF", "cubin")  # dummy; TypeError raised before use
+    with pytest.raises(TypeError, match="must be provided as an object of type LinkerOptions"):
+        Linker(obj, options={})

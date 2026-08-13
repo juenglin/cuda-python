@@ -1450,3 +1450,17 @@ def test_debug_dot_print_invalid_options(sample_graphdef, dot_file):
         sample_graphdef.allocate(ALLOC_SIZE)
     with pytest.raises(TypeError, match="options must be a GraphDebugPrintOptions"):
         sample_graphdef.debug_dot_print(str(dot_file), "invalid")
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_graph_definition_instantiate_rejects_dict_options(sample_graphdef):
+    """GraphDefinition.instantiate rejects a dict for options."""
+    with pytest.raises(TypeError, match="must be provided as an object of type"):
+        sample_graphdef.instantiate(options={})
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_graph_definition_debug_dot_print_rejects_dict_options(sample_graphdef, dot_file):
+    """GraphDefinition.debug_dot_print rejects a dict for options."""
+    with pytest.raises(TypeError, match="options must be a GraphDebugPrintOptions"):
+        sample_graphdef.debug_dot_print(str(dot_file), {})

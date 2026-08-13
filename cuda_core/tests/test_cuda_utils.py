@@ -218,6 +218,12 @@ def test_check_or_create_options_invalid_type():
         cuda_utils.check_or_create_options(_DummyOptions, 12345, options_description="test options")
 
 
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_check_or_create_options_rejects_dict():
+    with pytest.raises(TypeError, match="must be provided as an object"):
+        cuda_utils.check_or_create_options(_DummyOptions, {"x": 1}, options_description="test options")
+
+
 def test_assert_type_str_or_bytes_like_rejects_non_str_bytes():
     with pytest.raises(TypeError, match="Expected type str or bytes or bytearray"):
         assert_type_str_or_bytes_like(12345)

@@ -32,7 +32,7 @@ class Linker:
         Options for the linker. If not provided, default options will be used.
     """
 
-    def __init__(self, options: LinkerOptions | None=None, *object_codes: ObjectCode):
+    def __init__(self, *object_codes: ObjectCode, options: LinkerOptions | None=None):
         ...
 
     def link(self, target_type: ObjectCodeFormatType | str) -> ObjectCode:

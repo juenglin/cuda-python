@@ -90,3 +90,25 @@ def test_graph_build_mode(init_cuda):
 
     with pytest.raises(ValueError, match="^Unsupported build mode:"):
         gb = Device().create_graph_builder().begin_building(mode=None)
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_graph_builder_complete_rejects_dict_options(init_cuda):
+    mod = compile_common_kernels()
+    empty_kernel = mod.get_kernel("empty_kernel")
+    gb = Device().create_graph_builder().begin_building()
+    launch(gb, LaunchConfig(grid=1, block=1), empty_kernel)
+    gb.end_building()
+    with pytest.raises(TypeError, match="must be provided as an object of type"):
+        gb.complete(options={})
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_graph_builder_debug_dot_print_rejects_dict_options(init_cuda, tmp_path):
+    mod = compile_common_kernels()
+    empty_kernel = mod.get_kernel("empty_kernel")
+    gb = Device().create_graph_builder().begin_building()
+    launch(gb, LaunchConfig(grid=1, block=1), empty_kernel)
+    gb.end_building()
+    with pytest.raises(TypeError, match="must be provided as an object of type"):
+        gb.debug_dot_print(str(tmp_path / "out.dot"), options={})

@@ -1643,11 +1643,11 @@ def test_mempool_attributes_repr(memory_resource_factory):
     device.set_current()
 
     if MR is DeviceMemoryResource:
-        mr = MR(device, options={"max_size": 2048})
+        mr = MR(device, options=DeviceMemoryResourceOptions(max_size=2048))
     elif MR is PinnedMemoryResource:
-        mr = MR(options={"max_size": 2048})
+        mr = MR(options=PinnedMemoryResourceOptions(max_size=2048))
     elif MR is ManagedMemoryResource:
-        mr = create_managed_memory_resource_or_skip(options={})
+        mr = create_managed_memory_resource_or_skip(options=ManagedMemoryResourceOptions())
 
     buffer1 = mr.allocate(64, stream=device.default_stream)
     buffer2 = mr.allocate(64, stream=device.default_stream)
@@ -2011,3 +2011,28 @@ def test_dmr_ipc_enabled_unsupported_raises(mempool_device):
     with pytest.raises(RuntimeError, match="IPC is not available"):
         # uncapped-pool-ok: IPC support is checked before the pool is created
         DeviceMemoryResource(mempool_device, DeviceMemoryResourceOptions(ipc_enabled=True))
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_device_memory_resource_rejects_dict_options(mempool_device):
+    with pytest.raises(TypeError, match="must be provided as an object of type DeviceMemoryResourceOptions"):
+        DeviceMemoryResource(mempool_device, options={})
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_pinned_memory_resource_rejects_dict_options():
+    with pytest.raises(TypeError, match="must be provided as an object of type PinnedMemoryResourceOptions"):
+        PinnedMemoryResource(options={})
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_managed_memory_resource_rejects_dict_options():
+    with pytest.raises(TypeError, match="must be provided as an object of type ManagedMemoryResourceOptions"):
+        ManagedMemoryResource(options={})
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_virtual_memory_resource_rejects_dict_config(init_cuda):
+    device = Device()
+    with pytest.raises(TypeError, match="must be provided as an object of type VirtualMemoryResourceOptions"):
+        VirtualMemoryResource(device, config={})

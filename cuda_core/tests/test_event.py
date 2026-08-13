@@ -354,3 +354,16 @@ def test_event_set_membership(init_cuda):
     # Same event should not add duplicate
     event_set.add(e1)
     assert len(event_set) == 2
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_create_event_rejects_dict_options(init_cuda):
+    with pytest.raises(TypeError, match="must be provided as an object of type EventOptions"):
+        Device().create_event(options={})
+
+
+@pytest.mark.agent_authored(model="claude-sonnet-4-6")
+def test_stream_record_rejects_dict_options(init_cuda):
+    stream = Device().create_stream()
+    with pytest.raises(TypeError, match="must be provided as an object of type EventOptions"):
+        stream.record(options={})

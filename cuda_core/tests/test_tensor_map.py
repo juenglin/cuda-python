@@ -162,16 +162,16 @@ class TestTensorMapDescriptorCreation:
         )
         assert desc is not None
 
-    def test_strided_memory_view_as_tensor_map_options_dict(self, dev, skip_if_no_tma):
+    def test_strided_memory_view_as_tensor_map_rejects_options_dict(self, dev, skip_if_no_tma):
         buf = dev.allocate(1024 * 4, stream=dev.default_stream)
-        desc = _as_view(buf).as_tensor_map(
-            options={
-                "box_dim": (64,),
-                "data_type": np.float32,
-                "element_strides": (1,),
-            }
-        )
-        assert desc is not None
+        with pytest.raises(TypeError, match="must be provided as an object of type TensorMapDescriptorOptions"):
+            _as_view(buf).as_tensor_map(
+                options={
+                    "box_dim": (64,),
+                    "data_type": np.float32,
+                    "element_strides": (1,),
+                }
+            )
 
     def test_strided_memory_view_as_tensor_map_rejects_options_with_kwargs(self, dev, skip_if_no_tma):
         buf = dev.allocate(1024 * 4, stream=dev.default_stream)
