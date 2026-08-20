@@ -17,6 +17,7 @@ import zipfile
 from pathlib import Path
 
 from Cython.Build import cythonize
+from Cython.Compiler import ExprNodes as _CythonExprNodes
 from Cython.Compiler import Options as _CythonOptions
 from setuptools import Extension
 from setuptools import build_meta as _build_meta
@@ -27,6 +28,49 @@ build_sdist = _build_meta.build_sdist
 get_requires_for_build_sdist = _build_meta.get_requires_for_build_sdist
 
 COMPILE_FOR_COVERAGE = bool(int(os.environ.get("CUDA_PYTHON_COVERAGE", "0")))
+
+# Matches only Cython's "Not all members given for struct '<name>'" warning for the
+# CUmemLocation family (the struct itself, or its versioned aliases). See
+# _relax_cumemlocation_struct_literal_warning() below for why this is narrowly scoped.
+_PARTIAL_CUMEMLOCATION_STRUCT_LITERAL_RE = re.compile(r"^Not all members given for struct 'CUmemLocation(_st|_v1)?'$")
+
+
+def _relax_cumemlocation_struct_literal_warning() -> None:
+    """Stop -Werror from failing partial ``CUmemLocation`` struct literals.
+
+    Cython's struct-literal coercion (e.g. ``cydriver.CUmemLocation(type=..., id=...)``)
+    warns "Not all members given for struct '<name>'" whenever a call site does not name
+    every member declared in the corresponding ``cdef struct``. ``_build_cuda_core`` below
+    promotes that warning to a hard build error via ``Options.warning_errors = True``.
+
+    ``CUmemLocation`` (aka ``CUmemLocation_st`` / ``CUmemLocation_v1``) wraps a driver
+    union whose arms grow across CUDA header versions: CUDA 13.4 adds a ``localized`` arm
+    alongside the existing ``id`` arm. Every cuda_core call site only ever populates
+    ``type`` and ``id``, a complete initializer for the union arm actually in use --
+    but Cython's check counts declared members, not union arms, so the exact same source
+    starts warning (and, under -Werror, failing to build) purely because the generated
+    struct gained a sibling field. Downgrade only this one, name-scoped warning back to
+    non-fatal so cuda_core keeps compiling against both the pre- and post-13.4
+    ``cydriver.pxd`` layouts without rewriting every call site; every other Cython
+    warning is still promoted to an error as before.
+    """
+    if getattr(_CythonExprNodes.warning, "_cuda_core_relaxed_cumemlocation", False):
+        return  # already patched earlier in this process
+
+    original_warning = _CythonExprNodes.warning
+
+    def _patched_warning(position, message, level=0):
+        if _PARTIAL_CUMEMLOCATION_STRUCT_LITERAL_RE.match(message):
+            saved_warning_errors = _CythonOptions.warning_errors
+            _CythonOptions.warning_errors = False
+            try:
+                return original_warning(position, message, level)
+            finally:
+                _CythonOptions.warning_errors = saved_warning_errors
+        return original_warning(position, message, level)
+
+    _patched_warning._cuda_core_relaxed_cumemlocation = True
+    _CythonExprNodes.warning = _patched_warning
 
 
 # Please keep in sync with the copy in cuda_bindings/build_hooks.py.
@@ -222,6 +266,7 @@ def _build_cuda_core(debug=False):
     nthreads = int(os.environ.get("CUDA_PYTHON_PARALLEL_LEVEL", os.cpu_count() // 2))
     compile_time_env = {"CUDA_CORE_BUILD_MAJOR": int(_determine_cuda_major_version())}
     compiler_directives = {"embedsignature": True, "warn.deprecated.IF": False, "freethreading_compatible": True}
+    _relax_cumemlocation_struct_literal_warning()
     _CythonOptions.warning_errors = True
     if COMPILE_FOR_COVERAGE:
         compiler_directives["linetrace"] = True
