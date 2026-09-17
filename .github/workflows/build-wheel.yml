@@ -24,6 +24,11 @@ on:
         required: false
         type: boolean
         default: false
+      toolchain:
+        description: "C/C++ toolchain for Linux builds (gnu or llvm). Ignored on Windows (always msvc)."
+        required: false
+        type: string
+        default: "gnu"
 
 defaults:
   run:
@@ -240,10 +245,10 @@ jobs:
           CIBW_ENVIRONMENT_LINUX: >
             CUDA_PATH=/host/${{ env.CUDA_PATH }}
             CUDA_PYTHON_PARALLEL_LEVEL=${{ env.CUDA_PYTHON_PARALLEL_LEVEL }}
+            CUDA_PYTHON_TOOLCHAIN=${{ inputs.toolchain }}
+            CUDA_PYTHON_COMPILER_LAUNCHER=/host/${{ env.SCCACHE_PATH }}
             PIP_BUILD_CONSTRAINT=/host/${{ github.workspace }}/wheel-constraints/cuda-bindings.txt
             PIP_CONSTRAINT=/host/${{ github.workspace }}/wheel-constraints/cuda-bindings.txt
-            CC="/host/${{ env.SCCACHE_PATH }} cc"
-            CXX="/host/${{ env.SCCACHE_PATH }} c++"
             SCCACHE_GHA_ENABLED=true
             ACTIONS_RUNTIME_TOKEN=${{ env.ACTIONS_RUNTIME_TOKEN }}
             ACTIONS_RUNTIME_URL=${{ env.ACTIONS_RUNTIME_URL }}
@@ -252,6 +257,7 @@ jobs:
             ACTIONS_CACHE_SERVICE_V2=${{ env.ACTIONS_CACHE_SERVICE_V2 }}
             SCCACHE_DIR=/host/${{ env.SCCACHE_DIR }}
             SCCACHE_CACHE_SIZE=${{ env.SCCACHE_CACHE_SIZE }}
+          CIBW_BEFORE_ALL_LINUX: ${{ inputs.toolchain == 'llvm' && 'dnf install -y clang lld' || 'true' }}
           CIBW_ENVIRONMENT_WINDOWS: >
             CUDA_PATH="$(cygpath -w ${{ env.CUDA_PATH }})"
             CUDA_PYTHON_PARALLEL_LEVEL=${{ env.CUDA_PYTHON_PARALLEL_LEVEL }}
@@ -347,11 +353,11 @@ jobs:
           CIBW_ENVIRONMENT_LINUX: >
             CUDA_PATH=/host/${{ env.CUDA_PATH }}
             CUDA_PYTHON_PARALLEL_LEVEL=${{ env.CUDA_PYTHON_PARALLEL_LEVEL }}
+            CUDA_PYTHON_TOOLCHAIN=${{ inputs.toolchain }}
+            CUDA_PYTHON_COMPILER_LAUNCHER=/host/${{ env.SCCACHE_PATH }}
             CUDA_CORE_BUILD_MAJOR=${{ env.BUILD_CUDA_MAJOR }}
             PIP_BUILD_CONSTRAINT=/host/${{ github.workspace }}/wheel-constraints/cuda-core.txt
             PIP_CONSTRAINT=/host/${{ github.workspace }}/wheel-constraints/cuda-core.txt
-            CC="/host/${{ env.SCCACHE_PATH }} cc"
-            CXX="/host/${{ env.SCCACHE_PATH }} c++"
             SCCACHE_GHA_ENABLED=true
             ACTIONS_RUNTIME_TOKEN=${{ env.ACTIONS_RUNTIME_TOKEN }}
             ACTIONS_RUNTIME_URL=${{ env.ACTIONS_RUNTIME_URL }}
@@ -360,6 +366,7 @@ jobs:
             ACTIONS_CACHE_SERVICE_V2=${{ env.ACTIONS_CACHE_SERVICE_V2 }}
             SCCACHE_DIR=/host/${{ env.SCCACHE_DIR }}
             SCCACHE_CACHE_SIZE=${{ env.SCCACHE_CACHE_SIZE }}
+          CIBW_BEFORE_ALL_LINUX: ${{ inputs.toolchain == 'llvm' && 'dnf install -y clang lld' || 'true' }}
           CIBW_ENVIRONMENT_WINDOWS: >
             CUDA_PATH="$(cygpath -w ${{ env.CUDA_PATH }})"
             CUDA_PYTHON_PARALLEL_LEVEL=${{ env.CUDA_PYTHON_PARALLEL_LEVEL }}
@@ -641,11 +648,11 @@ jobs:
           CIBW_ENVIRONMENT_LINUX: >
             CUDA_PATH=/host/${{ env.CUDA_PATH }}
             CUDA_PYTHON_PARALLEL_LEVEL=${{ env.CUDA_PYTHON_PARALLEL_LEVEL }}
+            CUDA_PYTHON_TOOLCHAIN=${{ inputs.toolchain }}
+            CUDA_PYTHON_COMPILER_LAUNCHER=/host/${{ env.SCCACHE_PATH }}
             CUDA_CORE_BUILD_MAJOR=${{ env.BUILD_PREV_CUDA_MAJOR }}
             PIP_BUILD_CONSTRAINT=/host/${{ github.workspace }}/wheel-constraints/cuda-core-prev.txt
             PIP_CONSTRAINT=/host/${{ github.workspace }}/wheel-constraints/cuda-core-prev.txt
-            CC="/host/${{ env.SCCACHE_PATH }} cc"
-            CXX="/host/${{ env.SCCACHE_PATH }} c++"
             SCCACHE_GHA_ENABLED=true
             ACTIONS_RUNTIME_TOKEN=${{ env.ACTIONS_RUNTIME_TOKEN }}
             ACTIONS_RUNTIME_URL=${{ env.ACTIONS_RUNTIME_URL }}
@@ -654,6 +661,7 @@ jobs:
             ACTIONS_CACHE_SERVICE_V2=${{ env.ACTIONS_CACHE_SERVICE_V2 }}
             SCCACHE_DIR=/host/${{ env.SCCACHE_DIR }}
             SCCACHE_CACHE_SIZE=${{ env.SCCACHE_CACHE_SIZE }}
+          CIBW_BEFORE_ALL_LINUX: ${{ inputs.toolchain == 'llvm' && 'dnf install -y clang lld' || 'true' }}
           CIBW_ENVIRONMENT_WINDOWS: >
             CUDA_PATH="$(cygpath -w ${{ env.CUDA_PATH }})"
             CUDA_PYTHON_PARALLEL_LEVEL=${{ env.CUDA_PYTHON_PARALLEL_LEVEL }}

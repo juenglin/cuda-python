@@ -16,6 +16,11 @@ on:
         required: false
         default: ""
         type: string
+      toolchain:
+        description: "C/C++ toolchain for the build (gnu or llvm)."
+        required: false
+        type: string
+        default: "gnu"
 
 defaults:
   run:
@@ -122,8 +127,11 @@ jobs:
         if: ${{ env.BUILD_BINDINGS == 'true' }}
         run: |
           export CUDA_PYTHON_PARALLEL_LEVEL=$(nproc)
-          export CC="sccache cc"
-          export CXX="sccache c++"
+          export CUDA_PYTHON_TOOLCHAIN='${{ inputs.toolchain }}'
+          export CUDA_PYTHON_COMPILER_LAUNCHER="sccache"
+          if [ "${CUDA_PYTHON_TOOLCHAIN}" = "llvm" ]; then
+            sudo dnf install -y clang lld
+          fi
           export PIP_BUILD_CONSTRAINT="$(pwd)/wheel-constraints/cuda-bindings.txt"
           export PIP_CONSTRAINT="${PIP_BUILD_CONSTRAINT}"
           python -m build --sdist cuda_bindings/
@@ -161,9 +169,12 @@ jobs:
         if: ${{ env.BUILD_CORE == 'true' }}
         run: |
           export CUDA_PYTHON_PARALLEL_LEVEL=$(nproc)
+          export CUDA_PYTHON_TOOLCHAIN='${{ inputs.toolchain }}'
+          export CUDA_PYTHON_COMPILER_LAUNCHER="sccache"
           export CUDA_CORE_BUILD_MAJOR="$(echo '${{ inputs.cuda-version }}' | cut -d. -f1)"
-          export CC="sccache cc"
-          export CXX="sccache c++"
+          if [ "${CUDA_PYTHON_TOOLCHAIN}" = "llvm" ]; then
+            sudo dnf install -y clang lld
+          fi
           export PIP_BUILD_CONSTRAINT="$(pwd)/wheel-constraints/cuda-core.txt"
           export PIP_CONSTRAINT="${PIP_BUILD_CONSTRAINT}"
           python -m build --sdist cuda_core/

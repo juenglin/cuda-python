@@ -529,6 +529,26 @@ class TestResolveToolchain:
         _name, _cc, _cxx, _cargs, _largs = build_hooks._resolve_toolchain()
         assert os.environ["CC"] == "clang"
 
+    @pytest.mark.agent_authored(model="glm-5.2")
+    def test_launcher_wraps_default_toolchain(self, monkeypatch):
+        if sys.platform == "win32":
+            pytest.skip("launcher only composes with cc/cxx (Linux)")
+        monkeypatch.delenv("CUDA_PYTHON_TOOLCHAIN", raising=False)
+        monkeypatch.setenv("CUDA_PYTHON_COMPILER_LAUNCHER", "sccache")
+        _name, _cc, _cxx, _cargs, _largs = build_hooks._resolve_toolchain()
+        assert os.environ["CC"] == "sccache cc"
+        assert os.environ["CXX"] == "sccache c++"
+
+    @pytest.mark.agent_authored(model="glm-5.2")
+    def test_launcher_wraps_llvm(self, monkeypatch):
+        if sys.platform == "win32":
+            pytest.skip("llvm only valid on Linux")
+        monkeypatch.setenv("CUDA_PYTHON_TOOLCHAIN", "llvm")
+        monkeypatch.setenv("CUDA_PYTHON_COMPILER_LAUNCHER", "sccache")
+        _name, _cc, _cxx, _cargs, _largs = build_hooks._resolve_toolchain()
+        assert os.environ["CC"] == "sccache clang"
+        assert os.environ["CXX"] == "sccache clang++"
+
 
 class TestCheckToolchainAvailable:
     """_check_toolchain_available: fast, helpful failure when a tool is missing."""

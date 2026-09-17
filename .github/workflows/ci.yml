@@ -24,7 +24,16 @@ on:
   schedule:
     # every 24 hours at midnight UTC
     - cron: "0 0 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      toolchain:
+        description: "C/C++ toolchain for Linux builds (gnu or llvm). Ignored on Windows."
+        required: false
+        type: choice
+        options:
+          - gnu
+          - llvm
+        default: gnu
 
 jobs:
   ci-vars:
@@ -388,6 +397,7 @@ jobs:
       cuda-version: ${{ needs.ci-vars.outputs.CUDA_BUILD_VER }}
       prev-cuda-version: ${{ needs.ci-vars.outputs.CUDA_PREV_BUILD_VER }}
       workplan: ${{ needs.detect-changes.outputs.workplan }}
+      toolchain: ${{ inputs.toolchain || 'gnu' }}
 
   # See build-linux-64 for why build jobs are split by platform.
   build-linux-aarch64:
@@ -415,6 +425,7 @@ jobs:
       cuda-version: ${{ needs.ci-vars.outputs.CUDA_BUILD_VER }}
       prev-cuda-version: ${{ needs.ci-vars.outputs.CUDA_PREV_BUILD_VER }}
       workplan: ${{ needs.detect-changes.outputs.workplan }}
+      toolchain: ${{ inputs.toolchain || 'gnu' }}
 
   # See build-linux-64 for why build jobs are split by platform.
   build-windows:
@@ -494,6 +505,7 @@ jobs:
       host-platform: linux-64
       cuda-version: ${{ needs.ci-vars.outputs.CUDA_BUILD_VER }}
       workplan: ${{ needs.detect-changes.outputs.workplan }}
+      toolchain: ${{ inputs.toolchain || 'gnu' }}
 
   # See test-sdist-linux for why sdist test jobs are split by platform.
   test-sdist-windows:
