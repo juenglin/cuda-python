@@ -39,3 +39,9 @@ Build-Time Environment Variables
   extension modules. See the `cuda-bindings environment variables documentation
   <https://nvidia.github.io/cuda-python/cuda-bindings/latest/environment_variables.html>`_
   for the full description; it applies to ``cuda.core`` as well.
+
+- ``CUDA_PYTHON_COMPILER_LAUNCHER`` : A compiler launcher (e.g. ``sccache``)
+  prepended to the compiler selected by ``CUDA_PYTHON_TOOLCHAIN``. See the
+  `cuda-bindings environment variables documentation
+  <https://nvidia.github.io/cuda-python/cuda-bindings/latest/environment_variables.html>`_
+  for the full description.

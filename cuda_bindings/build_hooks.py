@@ -147,12 +147,16 @@ def _resolve_toolchain(debug=False, compile_for_coverage=False):
         # related to free-threading builds.
         extra_compile_args += ["-DCYTHON_TRACE_NOGIL=1", "-DCYTHON_USE_SYS_MONITORING=0"]
 
-    # Only override the env for a non-default toolchain; the default path must
-    # defer to any externally-set CC/CXX (e.g. the sccache wrapper in CI).
-    if name != allowed[0] and cc is not None:
-        os.environ["CC"] = cc
-        os.environ["CXX"] = cxx
-        os.environ["LDSHARED"] = f"{cxx} -shared"
+    # Touch the env only when we have something to add beyond what distutils
+    # would already pick up: a non-default toolchain (different compiler) or a
+    # launcher (wraps the compiler). The default toolchain with no launcher
+    # defers to any externally-set CC/CXX (e.g. a bare `CC="sccache cc"`).
+    launcher = os.environ.get("CUDA_PYTHON_COMPILER_LAUNCHER", "").strip()
+    if cc is not None and (name != allowed[0] or launcher):
+        prefix = f"{launcher} " if launcher else ""
+        os.environ["CC"] = f"{prefix}{cc}"
+        os.environ["CXX"] = f"{prefix}{cxx}"
+        os.environ["LDSHARED"] = f"{prefix}{cxx} -shared"
 
     return name, cc, cxx, extra_compile_args, extra_link_args
 
