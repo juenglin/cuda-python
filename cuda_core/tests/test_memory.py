@@ -1247,6 +1247,8 @@ def test_pinned_memory_resource_initialization(init_cuda):
 
 
 @pytest.mark.human_reviewed
+# Crashes under pytest-run-parallel on free-threaded Windows builds; fix is in #3436.
+@pytest.mark.skipif(sys.platform == "win32", reason="segfaults under parallel test execution on Windows (#3436)")
 @pytest.mark.parametrize("pool", ["current", "new", "new_numa"])
 def test_pinned_memory_resource_kernel_access(init_cuda, pool):
     """A kernel on the current device reads and writes PinnedMemoryResource buffers (#3205)."""
